@@ -1,0 +1,444 @@
+
+# This computes the power of a test for ES in (AB)^k designs
+# The estimator is of he form D/S, where D is a contrast among phase means
+#   and S^2 is a (pooled) variance at each timepoint, pooled over timepoints
+
+
+# First compute the (autocorrelated) covariance matrix within a person
+# There are n observations per phase, 2k phases, m individuals
+# Let yij be the observation for the ith person at the jth time
+# Here the observations are ordered yi1,...yin, ..., yi2kn for  
+#   the ith individual
+
+# COV is the covariance matrix of n autocorrelated observations within 
+#   a phase for each individual
+COV <- function (n,phi,s){
+  SIGMA <- matrix(nrow=n,ncol=n)
+  for (i in 1:n){
+    for (j in 1:n){
+      SIGMA[i,j] <- phi^abs(i-j)
+    }
+  }
+  SIGMA <- SIGMA*s/(1-phi^2) #is s the variance or s-squared?
+  return(SIGMA)
+}
+print(COV(4,.5,1))
+
+# Compute the variance of the numerator of the ES (mean difference)
+# Note that the numerator is the average of within-person contrasts 
+
+VarD <- function (k,n,m,phi,s){
+  N <- 2*k*n
+  Sig <- COV(N,phi,s)
+  Contrast <- matrix(nrow=2*k*n,ncol=1,data=1/(k*n))
+  for (i in 1:n){
+    for (j in 1:k){
+      Contrast[i+(j-1)*2*n,1] <- -1/(k*n)
+    }
+  }
+  Var <- t(Contrast)%*%Sig%*%Contrast
+  Var <- Var/m
+  return(Var)                  
+}
+
+print(VarD(k,n,m,0,1))
+print(VarD(k,n,m,.5,1))
+
+
+# Build the covariance matrix for the denominator (S^2)
+# To make computation of moments simpler, we use a different ordering 
+#   of observations for calculations in the numerator and denominator
+# Order the observations here as follows, where yij is the 
+# observation for the ith person at the jth time:
+# y11,...,ym1,y12,...,ym2, ..., y1(2kn),...ym(2kn)
+# S^2 is a quadratic form y'Ay/(2kn[m-1]) with variance
+# 2tr(A*SigV*A*SigV)/(4kn[m-1])^2)
+
+# This generates a row of the covariance matrix
+SigRow <- function (k,n,m,phi,tau,s,row){
+  Block <- diag(nrow=m)
+  BR <- Block*s+diag(nrow=m)*tau
+  limit <- 2*k*n
+  for (j in 1:limit){
+    BR <- cbind(BR,(s/(1-phi^2))*phi^abs(j-row)*Block+diag(nrow=m)*tau)
+  }
+  LL <-m+1
+  UL <- 2*k*n*m+m
+  BR <- BR[,LL:UL]
+  return(BR)  
+}
+k <- 1
+n <- 2
+m <- 2
+phi <- .5
+print(SigRow(k,n,m,phi,.6,1,1))
+
+# This puts the rows together to get the entire covariance matrix
+SigV <- function (k,n,m,phi,tau,s){
+  limit <- 2*k*n
+  R <- SigRow(k,n,m,phi,tau,s,1)
+  for (i in 2:limit){
+    R <- rbind(R,SigRow(k,n,m,phi,tau,s,i))
+  }
+  return(R)
+}
+print(SigV(k,n,m,.5,.5,1))
+
+# This defines the matrix of the quadratic form defining S^2
+# That is S^2 = t(y)*A*y/2kn(m-1)
+
+# This generates a row of the A matrix
+
+ARow <- function (k,n,m,phi,tau,s,row){
+  one <- matrix(data=1,nrow=m,ncol=1)
+  Ablock <- diag(m) - one%*%t(one)/m
+  Oblock <- matrix(data=0,nrow=m,ncol=m)
+  BR <- Ablock
+  limit <- 2*k*n
+  BR <- Ablock
+  for (j in 1:limit){
+    if (j == row) {BR <- cbind(BR,Ablock)} else {BR <- cbind(BR,Oblock)}
+  }
+  LL <-m+1
+  UL <- 2*k*n*m+m
+  BR <- BR[,LL:UL]
+  return(BR)  
+}
+print(ARow(k,n,m,.5,0,1,1))
+
+# This puts the rows together to get the entire the A matrix
+A <- function (k,n,m,phi,tau,s){
+  limit <- 2*k*n
+  A <- ARow(k,n,m,phi,tau,s,1)
+  for (i in 2:limit){
+    A <- rbind(A,ARow(k,n,m,phi,tau,s,i))
+  }
+  return(A)
+}
+print(A(k,n,m,.5,.5,1))
+
+# This defines the trace function
+tr <- function (A){
+  nr <-nrow(A)
+  nc <- ncol(A)
+  if (nr != nc)return("NR")
+  trace <- 0
+  for (i in 1:nr){
+    trace <- trace + A[i,i]
+  }
+  return(trace)
+}
+
+# This computes the expected value E(S^2), variance V(S^2), and 
+# degrees of freedom h of S^2
+
+ES2 <- function (k,n,m,phi,tau,s){
+  E <- tr(A(k,n,m,phi,tau,s) %*% SigV(k,n,m,phi,tau,s))/(2*k*n*(m-1))
+  return(E)
+}
+ES2(1,2,3,0,.5,.5)
+#
+
+VS2 <- function (k,n,m,phi,tau,s){
+  V <- 2*tr(A(k,n,m,phi,tau,s) %*% SigV(k,n,m,phi,tau,s)
+            %*%A(k,n,m,phi,tau,s) %*% SigV(k,n,m,phi,tau,s))/(2*k*n*(m-1))^2
+  return(V)
+}
+VS2(k,n,m,0,.5,1)
+
+# This computes the degrees of freedom of S^2
+h <- function (k,n,m,phi,tau,s){
+  h <- 2*ES2(k,n,m,phi,tau,s)^2/VS2(k,n,m,phi,tau,s)
+  return(h)
+}
+h(k,n,m,0,0,1)
+
+phi <- 0
+tau <- 0
+k <- 1
+m <- 3
+n <- 2
+
+# I used this to see that h was monotonic in phi – phi or rho?
+Tabh <- function(k,n,m,phi,rho){
+  Tab <- matrix(nrow=10,ncol=6)
+  colnames(Tab) <- c("k","n","m","phi","rho","h")
+  for (i in 1:10){
+    rho <- (i-1)/10
+    tau <- rho
+    s <- 1-rho
+    Tab[i,1] <- k
+    Tab[i,2] <- n
+    Tab[i,3] <- m
+    Tab[i,4] <- phi
+    Tab[i,5] <- rho
+    Tab[i,6] <- h(k,n,m,phi,tau,s)
+  }
+  return(Tab)  
+}
+print(Tabh(2,3,3,.5,.0),digits=5)
+
+h(2,3,3,.999,.5,.5)
+
+
+h(k,n,m,.95,tau,s)
+h(k,n,m,.99,tau,s)
+h(k,n,m,.999,tau,s)
+h(k,n,m,.9999,tau,s)
+h(1,3,2,0,0,1)
+
+# This computes the two-tailed power of the test based in the ES 
+# as a function of tau and s
+
+Power <- function (k,n,m,phi,tau,s,d,alpha){
+  df <- h(k,n,m,phi,tau,s)
+  CV <- qf(1-alpha,df1=1,df2=df)
+  a <- VarD(k,n,m,phi,s)/s
+  b <- ES2(k,n,m,phi,tau,s)/(s+tau)
+  L <- (b/a)*d^2
+  p <- 1-pf(CV,df1=1,df2=df,ncp=L)
+  return(p)
+}
+
+# This gives power as a function of rho rather than s and tau
+
+PowerNew <- function (k,n,m,phi,rho,d,alpha){
+  tau <- rho
+  s <- 1-rho
+  df <- h(k,n,m,phi,tau,s)
+  CV <- qf(1-alpha,df1=1,df2=df)
+  a <- VarD(k,n,m,phi,s)/s
+  b <- ES2(k,n,m,phi,tau,s)/(s+tau)
+  L <- (b/a)*d^2
+  #  print(a)
+  #  print(b)
+  #  print(L)
+  p <- 1-pf(CV,df1=1,df2=df,ncp=L)
+  return(p)
+}
+
+
+# This computes the power function if phi = 0 so the data are independent
+# This case is equivalent to a t-test with kmn observations per group
+
+PowerS <- function (k,n,m,d,alpha){
+#  df <- 2*k*n*m-2
+  df <- m-1  
+    CV <- qf(1-alpha,df1=1,df2=df)
+#  L <- (k*n*m/2)*d^2
+  L <- m*d^2  
+#  print(L)
+  p <- 1-pf(CV,df1=1,df2=df,ncp=L)
+  return(p)
+}
+
+
+alpha <- 0.05
+k <- 1
+n <- 5
+m <- 4
+phi <- .5
+
+rho <- .5
+tau <- rho
+s <- 1-rho
+
+d <- 1.
+
+Table1 <- matrix(nrow=9,ncol=14)
+colnames(Table1) <- c("k","n","m","phi","rho","tau","s","df","dfSCD",
+                      "d","PowSCD","PowNew","a","b")
+for (i in 0:9){
+  rho <- i/10
+  tau <- rho
+  s <- 1-rho
+  Table1[i,] <- c(k,n,m,phi,rho,tau,s,2*k*n*m-2,h(k,n,m,phi,tau,s),d,
+                  Power(k,n,m,phi,tau,s,d,.05),PowerNew(k,n,m,phi,rho,d,alpha),
+                  VarD(k,n,m,phi,s),ES2(k,n,m,phi,tau,s))
+}
+print(Table1, digits=2)
+Power(k,n,m,0,tau,s,d,.05)
+PowerS(k,n,m,d,.05)
+
+Fig1 <- matrix(nrow=99,ncol=4)
+for (i in 1:99){
+  rho <- i/100
+  Fig1[i,1] <- rho
+  Fig1[i,2] <- PowerNew(2,4,4,.1,rho,.75,.05)
+  Fig1[i,3] <- PowerNew(2,4,4,.3,rho,.75,.05)
+  Fig1[i,4] <- PowerNew(2,4,4,.5,rho,.75,.05)
+}
+# print(Fig1)
+plot(x=Fig1[,1],y=Fig1[,2],type="l",lty=1,lwd=2,xlim=c(0,1),ylim=c(0,1),
+     xlab=expression(rho),ylab="Power",main="Figure 1")
+lines(x=Fig1[,1],y=Fig1[,3],type="l",lty=2,lwd=2)
+lines(x=Fig1[,1],y=Fig1[,4],type="l",lty=3,lwd=2)
+legend(x="bottomleft",legend=c(expression(phi==.1),expression(phi==.3),
+                                expression(phi==.5)),2:4,lty=1:3,inset= 0.05, bty="n")
+Fig2 <- matrix(nrow=99,ncol=4)
+for (i in 1:99){
+  phi <- i/100
+  Fig2[i,1] <- phi
+  Fig2[i,2] <- PowerNew(2,4,4,phi,.2,.75,.05)
+  Fig2[i,3] <- PowerNew(2,4,4,phi,.5,.75,.05)
+  Fig2[i,4] <- PowerNew(2,4,4,phi,.8,.75,.05)
+}
+print(Fig2)
+plot(x=Fig2[,1],y=Fig2[,2],type="l",lty=1,lwd=2,xlim=c(0,1),ylim=c(0,1),
+     xlab=expression(phi),ylab="Power",main="Figure 2")
+lines(x=Fig2[,1],y=Fig2[,3],type="l",lty=2,lwd=2)
+lines(x=Fig2[,1],y=Fig2[,4],type="l",lty=3,lwd=2)
+legend(x="bottomright",legend=c(expression(rho==.2),expression(rho==.5),
+                  expression(rho==.8)),2:4,lty=1:3,inset= 0.05, bty="n")
+
+Fig3 <- matrix(nrow=12,ncol=4)
+for (i in 2:12){
+  m <- i
+  Fig3[i,1] <- m
+  Fig3[i,2] <- PowerNew(2,3,m,.5,.5,.75,.05)
+  Fig3[i,3] <- PowerNew(2,6,m,.5,.5,.75,.05)
+  Fig3[i,4] <- PowerNew(2,9,m,.5,.5,.75,.05)
+}
+# print(Fig3,digits=3)
+plot(x=Fig3[,1],y=Fig3[,2],type="l",lty=1,lwd=2,xlim=c(1,12),ylim=c(0,1),
+     xlab="m",ylab="Power",main="Figure 3")
+lines(x=Fig3[,1],y=Fig3[,3],type="l",lty=2,lwd=2)
+lines(x=Fig3[,1],y=Fig3[,4],type="l",lty=3,lwd=2)
+legend(x="bottomright",legend=c("n=9","n=6","n=3"),2:4,lty=3:1,inset= 0.05, 
+                                bty="n")
+
+Fig4 <- matrix(nrow=12,ncol=4)
+for (i in 2:12){
+  n <- i
+  Fig4[i,1] <- n
+  Fig4[i,2] <- PowerNew(2,n,3,.5,.5,.75,.05)
+  Fig4[i,3] <- PowerNew(2,n,6,.5,.5,.75,.05)
+  Fig4[i,4] <- PowerNew(2,n,9,.5,.5,.75,.05)
+}
+# print(Fig4,digits=3)
+plot(x=Fig4[,1],y=Fig4[,2],type="l",lty=1,lwd=2,xlim=c(1,12),ylim=c(0,1),
+     xlab="n",ylab="Power",main="Figure 4")
+lines(x=Fig4[,1],y=Fig4[,3],type="l",lty=2,lwd=2)
+lines(x=Fig4[,1],y=Fig4[,4],type="l",lty=3,lwd=2)
+legend(x="bottomright",legend=c("m=9","m=6","m=3"),2:4,lty=3:1,inset= 0.05, 
+       bty="n")
+
+Fig5a <- matrix(nrow=149,ncol=4)
+for (i in 1:149){
+  d <- i/100
+  Fig5a[i,1] <- d
+  Fig5a[i,2] <- PowerNew(1,3,3,.5,.5,d,.05)
+  Fig5a[i,3] <- PowerNew(2,3,3,.5,.5,d,.05)
+  Fig5a[i,4] <- PowerNew(3,3,3,.5,.5,d,.05)
+}
+# print(Fig5a,digits=3)
+plot(x=Fig5a[,1],y=Fig5a[,2],type="l",lty=1,lwd=2,xlim=c(0,1.5),ylim=c(0,1),
+     xlab=expression(delta),ylab="Power",main="Figure 5a")
+lines(x=Fig5a[,1],y=Fig5a[,3],type="l",lty=2,lwd=2)
+lines(x=Fig5a[,1],y=Fig5a[,4],type="l",lty=3,lwd=2)
+legend(x="topleft",legend=c("k=3","k=2","k=1"),2:4,lty=3:1,inset= 0.05, 
+       bty="n")
+
+Fig5b <- matrix(nrow=149,ncol=4)
+for (i in 1:149){
+  d <- i/100
+  Fig5b[i,1] <- d
+  Fig5b[i,2] <- PowerNew(1,3,5,.5,.5,d,.05)
+  Fig5b[i,3] <- PowerNew(2,3,5,.5,.5,d,.05)
+  Fig5b[i,4] <- PowerNew(3,3,5,.5,.5,d,.05)
+}
+# print(Fig5b,digits=3)
+plot(x=Fig5b[,1],y=Fig5b[,2],type="l",lty=1,lwd=2,xlim=c(0,1.5),ylim=c(0,1),
+     xlab=expression(delta),ylab="Power",main="Figure 5b")
+lines(x=Fig5b[,1],y=Fig5b[,3],type="l",lty=2,lwd=2)
+lines(x=Fig5b[,1],y=Fig5b[,4],type="l",lty=3,lwd=2)
+legend(x="topleft",legend=c("k=3","k=2","k=1"),2:4,lty=3:1,inset= 0.05, 
+       bty="n")
+
+Fig6a <- matrix(nrow=149,ncol=4)
+for (i in 1:149){
+  d <- i/100
+  Fig6a[i,1] <- d
+  Fig6a[i,2] <- PowerNew(2,2,3,.5,.5,d,.05)
+  Fig6a[i,3] <- PowerNew(2,3,3,.5,.5,d,.05)
+  Fig6a[i,4] <- PowerNew(2,5,3,.5,.5,d,.05)
+}
+# print(Fig6a,digits=3)
+plot(x=Fig6a[,1],y=Fig6a[,2],type="l",lty=1,lwd=2,xlim=c(0,1.5),ylim=c(0,1),
+     xlab=expression(delta),ylab="Power",main="Figure 6a")
+lines(x=Fig6a[,1],y=Fig6a[,3],type="l",lty=2,lwd=2)
+lines(x=Fig6a[,1],y=Fig6a[,4],type="l",lty=3,lwd=2)
+legend(x="topleft",legend=c("n=5","n=3","n=2"),2:4,lty=3:1,inset= 0.05, 
+       bty="n")
+
+Fig6b <- matrix(nrow=149,ncol=4)
+for (i in 1:149){
+  d <- i/100
+  Fig6b[i,1] <- d
+  Fig6b[i,2] <- PowerNew(2,2,5,.5,.5,d,.05)
+  Fig6b[i,3] <- PowerNew(2,3,5,.5,.5,d,.05)
+  Fig6b[i,4] <- PowerNew(2,5,5,.5,.5,d,.05)
+}
+# print(Fig6b,digits=3)
+plot(x=Fig6b[,1],y=Fig6b[,2],type="l",lty=1,lwd=2,xlim=c(0,1.5),ylim=c(0,1),
+     xlab=expression(delta),ylab="Power",main="Figure 6b")
+lines(x=Fig6b[,1],y=Fig6b[,3],type="l",lty=2,lwd=2)
+lines(x=Fig6b[,1],y=Fig6b[,4],type="l",lty=3,lwd=2)
+legend(x="topleft",legend=c("n=5","n=3","n=2"),2:4,lty=3:1,inset= 0.05, 
+       bty="n")
+
+# This is to check the variances of numerator and denominator of ES
+
+TabV <- matrix(nrow=9,ncol=7)
+colnames(TabV) <- c("k","n","m","phi","rho", "VarNum","VarDenom")
+TableV <- function(k,n,m,phi,rho){
+  TabV <- matrix(nrow=10,ncol=7) 
+  colnames(TabV) <- c("k","n","m","phi","rho", "VarNum","VarDenom")
+#  tau <- rho
+#  s <- 1-rho
+  for (i in 1:10){
+    rho <- (i-1)/10
+    tau <- rho
+    s <- 1-rho
+    TabV[i,1] <- k
+    TabV[i,2] <- n
+    TabV[i,3] <- m
+    TabV[i,4] <- phi
+    TabV[i,5] <- rho
+    TabV[i,6] <- VarD(k,n,m,phi,s)
+    TabV[i,7] <- VS2(k,n,m,phi,tau,s)
+  }
+  return(TabV)
+}
+print(TableV(2,3,4,.5,.5), digits=3)
+
+
+PowerNew(2,3,7,.5,.5,.75,.05)
+h(2,3,3,.5,.5,.5)
+
+# Miscellaneous computations for the example
+
+EA <- function(k,n,m,phi,rho){
+    s = 1-rho
+    a <- VarD(k,n,m,phi,s)/s
+    return(a)
+}
+EB <- function(k,n,m,phi,rho){
+  tau <- rhos <- 1-rho
+  b <- ES2(k,n,m,phi,tau,s)/(s+tau)
+  return(b)
+}
+EC <- function (k,n,m,phi,rho){
+  tau <- rhos <- 1-rho
+  c <- VS2(k,n,m,phi,tau,s)
+  return(c)
+}
+a <- EA(2,3,3,.5,.5)
+b <- EB(2,3,3,.5,.5)
+c <- EC(2,3,3,.5,.5)
+h <- 2*b^2/c
+a
+b
+c
+h
+sqrt(b/a)*.75
